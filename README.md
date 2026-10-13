@@ -12,18 +12,24 @@ Header-only engine (`include/lob/book.hpp`), integer price ticks, no dependencie
 - `unordered_map<id, iterator>` index: O(1) lookup, O(log L) cancel. Trades print at the resting order's price.
 - Market orders are IOC: unfilled remainder is discarded. Rejects: id 0, duplicate live id, qty <= 0, limit price <= 0.
 
-## Benchmarks (1M ops/workload, -O2, sandbox VM; your numbers will differ)
-| workload | ops/s | p50 | p99 |
-|---|---|---|---|
-| passive | 4.1M | 170 ns | 1.9 us |
-| mixed (25% cancel, 15% market) | 3.4M | 200 ns | 1.2 us |
-| aggressive | 4.0M | 206 ns | 0.9 us |
-| cancel-heavy | 3.2M | 233 ns | 1.1 us |
+## Benchmarks
 
-Trade-offs: std::map is simple and handles any price range but is pointer-chasing (cache misses explain the p99 tail
-and the multi-ms max, which is mostly OS jitter and allocation). std::list gives stable iterators for cheap cancel but
-allocates per order. Next experiments: flat array of levels indexed by tick (O(1) best-price with a bitmap), pooled
-allocator, intrusive lists, heap with lazy deletion. Compare them under these same workloads.
+1M orders per workload. Windows laptop, AMD Ryzen 9 [exact model], [compiler + version], [flags, e.g. -O2], plugged in, run from `make bench`.
+Timing uses std::chrono::steady_clock (QueryPerformanceCounter on Windows, about 100 ns resolution), with about 20-30 ns timer overhead per sample.
+
+| workload                       | ops/s | p50    | p99    | p99.9   |
+| ------------------------------ | ----- | ------ | ------ | ------- |
+| passive                        | 7.3M  | 100 ns | 200 ns | 22.2 us |
+| mixed (25% cancel, 15% market) | 5.2M  | 100 ns | 900 ns | 1.7 us  |
+| aggressive                     | 8.8M  | 100 ns | 500 ns | 1.1 us  |
+| cancel-heavy                   | 6.4M  | 100 ns | 700 ns | 1.7 us  |
+
+Reading the numbers:
+- p50 is identical across workloads because it sits at the timer resolution, so treat it as a floor, not a precise median. p99 and p99.9 are the informative columns.
+- Max latency (7 to 26 ms) is OS scheduling jitter on a non-realtime laptop, not engine cost.
+- Throughput is measured over the full run, so it is more reliable than per-op latency at this scale.
+
+Trade-offs: std::map handles any price range but is pointer-chasing, and std::list allocates per order. Both contribute to the p99 tail. Next experiments: flat array of levels indexed by tick (O(1) best price with a bitmap), pooled allocator, intrusive lists. Compare them under these same workloads.
 
 ## Research
 `research/imbalance.cpp`: I = (Qb-Qa)/(Qb+Qa), depth 1 and 5. Signal uses the book before each event; target is
